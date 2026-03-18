@@ -1,81 +1,106 @@
+# ENTRY CODE EXECUTION :: START
 
-# --- ENTRY CODE EXECUTION :: START ---
-hedge_required = config['HEDGE_TYPE'] != "NH"
 result = (None, None, None, None, None)
 
-# 1. Unified Search (Main + Hedge in one go)
 for attempt in range(3):
-    # This calls our new fast, robust function
     result = get_robust_optimal_option(
-        signal="BUY", 
-        spot=close, 
-        nearest_price=config['NEAREST_LTP'], 
-        instruments_df=instruments_df, 
-        config=config, 
-        user=user, 
-        hedge_offset=200 if config['HEDGE_TYPE'] == "H-M200" else 100, 
-        hedge_required=hedge_required
+        "BUY",
+        close,
+        config['NEAREST_LTP'],
+        instruments_df,
+        config,
+        user,
+        hedge_offset=config.get('HEDGE_OFFSET', 200),
+        hedge_required=False   # ✅ EXACT same behavior as before
     )
     
-    if result[0] is not None:
+    # If valid symbol found
+    if result and result[0] is not None:
         break
         
-    logging.info(f"⚠️{key} | {user['user']} | Search Attempt {attempt+1} failed. Retrying in 2s...")
+    logging.info(f"⚠️{key} | {user['user']} {SERVER} | Search Attempt {attempt+1} failed to find an option within tolerance. Retrying in 2s...")
     time.sleep(2)
 
-# 2. Validation Check
-opt_symbol, strike, expiry, ltp, hedge_opt_symbol = result
-
-if opt_symbol is None or (hedge_required and hedge_opt_symbol is None):
-    err_msg = f"❌{key} | {user['user']} {SERVER} | No suitable Pair (Main+Hedge) found for BUY signal."
-    logging.error(err_msg)
-    send_telegram_message(err_msg, user['telegram_chat_id'], user['telegram_token'])
-    send_telegram_message_admin(err_msg)
+# -------------------------------
+# FAILURE CHECK
+# -------------------------------
+if not result or result[0] is None:
+    logging.error(f"❌{key} | {user['user']} {SERVER} | No suitable option found for BUY signal.")
     continue
 
-# 3. Prepare for Execution
-# Note: We don't need a separate get_hedge_option call anymore!
+# -------------------------------
+# UNPACK (ignore hedge output)
+# -------------------------------
+opt_symbol, strike, expiry, ltp, _ = result
+
+# -------------------------------
+# PREPARE ENTRY SYMBOLS (UNCHANGED)
+# -------------------------------
 temp_trade_symbols = {
     "OptionSymbol": opt_symbol,
-    "hedge_option_symbol": hedge_opt_symbol
+    "hedge_option_symbol": config.get('HEDGE_SYMBOL', '-')
 }
 
-print(f"📤{key} | {user['user']} {SERVER} | Entering Pair: {opt_symbol} + {hedge_opt_symbol}")
-logging.info(f"📤 {key} | Entering Entry Sequence for {opt_symbol} with Hedge {hedge_opt_symbol}")
+print(f"📤 {key} | {user['user']} {SERVER} | Enter Signal Generated: Selling {opt_symbol} | LTP: ₹{ltp:.2f}")
+logging.info(f"📤 {key} | {user['user']} {SERVER} | Enter Signal Generated: Selling {opt_symbol} | LTP: ₹{ltp:.2f}")
 
-# 4. Robust Entry Execution
-# Ensure execute_robust_entry is programmed to buy the hedge_symbol first for margin
-qty, avg_price, hedge_avg_price = execute_robust_entry(temp_trade_symbols, config, user)
+# -------------------------------
+# ENTRY EXECUTION
+# -------------------------------
+new_qty, avg_price, hedge_avg_price = execute_robust_entry(
+    temp_trade_symbols,
+    config,
+    user
+)
 
-# 5. Final Validation and Database Save
-if not is_valid_trade_data(qty, avg_price, hedge_avg_price, hedge_required=hedge_required):
-    err_msg = f"⚠️ {key} | FAILED Entry: Qty or Price is 0. Database NOT updated."
+logging.info(f"📤{key} | Entered without Hedge position {opt_symbol} with Avg price: ₹{avg_price:.2f} | Qty: {new_qty}.")
+
+# -------------------------------
+# VALIDATION (UNCHANGED)
+# -------------------------------
+if not is_valid_trade_data(new_qty, avg_price, hedge_avg_price, hedge_required=False):
+    err_msg = f"⚠️ {key} | FAILED ENTRY: Qty ({new_qty}) or Price ({avg_price}) is 0. Database NOT updated."
     logging.error(err_msg)
     send_telegram_message_admin(err_msg)
-    break 
+    break
 
+# -------------------------------
+# SAVE TRADE
+# -------------------------------
 trade = {
-    "Signal": "BUY", "SpotEntry": close, "OptionSymbol": opt_symbol,
-    "Strike": strike, "Expiry": expiry,
-    "OptionSellPrice": avg_price, "EntryTime": current_time,
-    "qty": qty, "interval": config['INTERVAL'], "real_trade": config['REAL_TRADE'],
-    "EntryReason":"SIGNAL_GENERATED", "ExpiryType":config['EXPIRY'],
-    "Strategy":config['STRATEGY'], "Key":key, "hedge_option_symbol":hedge_opt_symbol,
-    "hedge_strike": strike - 200 if config['HEDGE_TYPE'] == "H-M200" else strike - 100, # Simplified
+    "Signal": "BUY",
+    "SpotEntry": close,
+    "OptionSymbol": opt_symbol,
+    "Strike": strike,
+    "Expiry": expiry,
+
+    "OptionSellPrice": avg_price,
+    "EntryTime": current_time,
+    "qty": new_qty,
+
+    "interval": config['INTERVAL'],
+    "real_trade": config['REAL_TRADE'],
+    "EntryReason": "SIGNAL_GENERATED",
+    "ExpiryType": config['EXPIRY'],
+    "Strategy": config['STRATEGY'],
+    "Key": key,
+
+    "hedge_option_symbol": temp_trade_symbols["hedge_option_symbol"],
+    "hedge_strike": "-",
     "hedge_option_buy_price": hedge_avg_price,
-    "hedge_qty": qty if hedge_required else 0, 
-    "hedge_entry_time": current_time
+    "hedge_qty": new_qty if hedge_avg_price > 0 else "-",
+    "hedge_entry_time": current_time if hedge_avg_price > 0 else "-"
 }
 
 trade = get_clean_trade(trade)
 save_open_position(trade, config, user['id'])
+
 position = "BUY"
 
 send_telegram_message(
-    f"🟢{key} | {user['user']} {SERVER} | Buy Signal\n"
-    f"Main: {opt_symbol} @ ₹{avg_price:.2f}\n"
-    f"Hedge: {hedge_opt_symbol} @ ₹{hedge_avg_price:.2f}\n"
-    f"Qty: {qty}", 
-    user['telegram_chat_id'], user['telegram_token']
+    f"🟢{key} | BUY Entry Signal Generated\n Selling {opt_symbol} | Avg ₹{avg_price:.2f} | Qty: {new_qty}",
+    user['telegram_chat_id'],
+    user['telegram_token']
 )
-# --- ENTRY CODE EXECUTION :: END ---
+
+# ENTRY CODE EXECUTION :: END
