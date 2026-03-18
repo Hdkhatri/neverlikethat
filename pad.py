@@ -10,7 +10,7 @@ for attempt in range(3):
         instruments_df,
         config,
         user,
-        hedge_offset=config.get('HEDGE_OFFSET', 200),
+        hedge_offset=None,
         hedge_required=False   # ✅ EXACT same behavior as before
     )
     
@@ -38,7 +38,7 @@ opt_symbol, strike, expiry, ltp, _ = result
 # -------------------------------
 temp_trade_symbols = {
     "OptionSymbol": opt_symbol,
-    "hedge_option_symbol": config.get('HEDGE_SYMBOL', '-')
+    "hedge_option_symbol": '-'
 }
 
 print(f"📤 {key} | {user['user']} {SERVER} | Enter Signal Generated: Selling {opt_symbol} | LTP: ₹{ltp:.2f}")
