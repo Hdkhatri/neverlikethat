@@ -1,3 +1,4 @@
+
 # --- ENTRY CODE EXECUTION :: START ---
 hedge_required = config['HEDGE_TYPE'] != "NH"
 result = (None, None, None, None, None)
