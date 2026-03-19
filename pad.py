@@ -8,16 +8,28 @@ h_offset = 200 if config['HEDGE_TYPE'] == "H-M200" else 100
 # MAIN + HEDGE SEARCH (ROBUST)
 # -------------------------------
 for attempt in range(3):
-    result = get_robust_optimal_option(
-        signal,
-        close,
-        config['NEAREST_LTP'],
-        instruments_df,
-        config,
-        user,
-        hedge_offset=h_offset,
-        hedge_required=(config['HEDGE_TYPE'] != "NH")
-    )
+    if config['HEDGE_TYPE'] == "H-P10":
+        result = get_robust_optimal_option(
+            signal,
+            close,
+            config['NEAREST_LTP'],
+            instruments_df,
+            config,
+            user,
+            hedge_offset=None,
+            hedge_required=False
+        )
+    else:
+        result = get_robust_optimal_option(
+            signal,
+            close,
+            config['NEAREST_LTP'],
+            instruments_df,
+            config,
+            user,
+            hedge_offset=h_offset,
+            hedge_required=(config['HEDGE_TYPE'] != "NH")
+        )
 
     if result and result[0] is not None:
         break
