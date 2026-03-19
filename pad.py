@@ -105,6 +105,16 @@ delete_open_position(trade["OptionSymbol"], config, trade, user['id'])
 if config['HEDGE_ROLLOVER_TYPE'] == 'SEMI' and expiry_match == "SAME" and not qty_changed:
     hedge_opt_symbol = old_trade.get('hedge_option_symbol')
 
+if config['HEDGE_TYPE'] == "H-P10":
+    # For P10, find Main first (Hedge Required=False for this call)
+    if opt_symbol:
+        h_res = get_robust_optimal_option(signal="BUY", spot=close, nearest_price=HEDGE_NEAREST_LTP, 
+                                        instruments_df=instruments_df, config=config, user=user, hedge_required=False)
+        if h_res[0]:
+            # Combine Main from first call and Hedge from second call
+            result = (opt_symbol,, strike, expiry, ltp, h_res[0])
+        else: result = (None,) * 5
+
 # DIFF expiry → must have hedge from robust
 elif config['HEDGE_TYPE'] != "NH" and hedge_opt_symbol is None:
     logging.error(f"❌ {key} | No hedge found for new expiry")
